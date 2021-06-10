@@ -1,10 +1,13 @@
 from pandas.core.frame import DataFrame
 import requests
 from requests.models import Response
-from parameters import URL, country_codes, indicators_wanterd
+from parameters import URL, country_codes, indicators_wanted_v2
 from models import Country
+import gspread
+from gspread_dataframe import set_with_dataframe
 import xml.etree.ElementTree as ET
 import pandas as pd
+import json
 
 
 def init_country_objects(country_codes):
@@ -21,28 +24,24 @@ def get_and_write_xml_by_country():
   for country_code in countries.keys():
     country_url = get_url_by_country(base_url=URL, country_code=country_code )
     countries[country_code].url = country_url
-    # print("country_code: " + country_code)
     print("country_URL: " + countries[country_code].url+ "\n")  
     response = requests.get(countries[country_code].url)
-    xml_path_name = './xml_files/' + countries[country_code].name + '.xml'
-    with open(xml_path_name, 'wb') as f:
-        f.write(response.content)
-    countries[country_code].response = response
-    # This break statement is used while developing, 
-    # so the process only runs for the firt country.
-    break
+    # xml_path_name = './xml_files/' + countries[country_code].name + '.xml'
+    # with open(xml_path_name, 'wb') as f:
+    #     f.write(response.content)
+    countries[country_code].response = response    
   return countries;
      
 def create_df(countries, indicators_wanted):
   all_countries_df = pd.DataFrame(data=None)
   for country_code in countries.keys():
+    print(country_code)
     countries[country_code].etree = ET.fromstring(countries[country_code].response.content)
-    gho_set = {}
+    gho_set = {None}
     for node in countries[country_code].etree:
       indicator = node.find("GHO").text if node.find("GHO") is not None else None
       gho_set.add(indicator)
       if indicator in indicators_wanted: 
-        
         country = node.find("COUNTRY").text if node.find("COUNTRY") is not None else None
         sex = node.find("SEX").text if node.find("SEX") is not None else None
         ghecauses = node.find("GHECAUSES").text if node.find("GHECAUSES") is not None else None
@@ -66,14 +65,32 @@ def create_df(countries, indicators_wanted):
         countries[country_code].nodes_data["High"].append(high)
     
     countries[country_code].df = pd.DataFrame(data=countries[country_code].nodes_data)
-    all_countries_df.append(countries[country_code].df)
+    all_countries_df = all_countries_df.append(countries[country_code].df)
+  return all_countries_df
+  
 
-    break
-  return None
+def dict_to_txt(dict_input):
+  gho_str =  "GHO_DICT = "         
+  gho_str += json.dumps(dict_input)
+  with open("gho_dict.txt", 'w') as f:
+      f.write(gho_str)
+    
 
+def open_df_in_spreadsheets(df):
+
+  # Access Google Sheet
+  gc = gspread.service_account(filename="helthreportsfromwho-cb747e651db1.json")
+  sh = gc.open_by_key("1v1ADDrxvLpQ0ZVtaagcYNT--Ik3lu7pEmIpdfJCUEQQ")
+  worksheet = sh.get_worksheet(0)
+  worksheet.clear()
+  
+  # Append Data to Sheet
+  set_with_dataframe(worksheet, df)
+  return True
 
 if __name__ == "__main__": 
   countries = get_and_write_xml_by_country()
-  create_df(countries, indicators_wanterd)
+  the_df = create_df(countries, indicators_wanted_v2)
+  open_df_in_spreadsheets(the_df)
   print("finished")
 
